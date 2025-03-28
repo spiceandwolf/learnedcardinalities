@@ -6,7 +6,7 @@ import torch
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
-from mscn.util import *
+from price_test.util import *
 from price_test.data import get_train_datasets, load_data, make_dataset
 from mscn.model import SetConv
 
@@ -75,7 +75,7 @@ def print_qerror(preds_unnorm, labels_unnorm):
 def train_and_predict(workload_name, num_queries, training_file_path, testing_file_path, num_epochs, batch_size, hid_units, cuda):
     # Load training and validation data
     num_materialized_samples = 1000
-    dicts, column_min_max_vals, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data = get_train_datasets(
+    dicts, column_min_max_vals, column_value_index_dicts, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data = get_train_datasets(
         num_queries, num_materialized_samples, workload_name, training_file_path)
     table2vec, column2vec, op2vec, join2vec = dicts
 
@@ -118,6 +118,8 @@ def train_and_predict(workload_name, num_queries, training_file_path, testing_fi
             optimizer.step()
 
         print("Epoch {}, loss: {}".format(epoch, loss_total / len(train_data_loader)))
+        
+    torch.save(model.state_dict(), f'results/predictions_{workload_name}.pth')
 
     # Get final training and validation set predictions
     preds_train, t_total = predict(model, train_data_loader, cuda)
@@ -127,9 +129,11 @@ def train_and_predict(workload_name, num_queries, training_file_path, testing_fi
     print("Prediction time per validation sample: {}".format(t_total / len(labels_test) * 1000))
 
     # Unnormalize
+    preds_train = [p.cpu() for p in preds_train]
     preds_train_unnorm = unnormalize_labels(preds_train, min_val, max_val)
     labels_train_unnorm = unnormalize_labels(labels_train, min_val, max_val)
 
+    preds_test = [p.cpu() for p in preds_test]
     preds_test_unnorm = unnormalize_labels(preds_test, min_val, max_val)
     labels_test_unnorm = unnormalize_labels(labels_test, min_val, max_val)
 
@@ -142,12 +146,12 @@ def train_and_predict(workload_name, num_queries, training_file_path, testing_fi
     print("")
 
     # Load test data
-    file_name = f"{testing_file_path}/{workload_name}/workload"
+    file_name = f"{testing_file_path}/{workload_name}/workloads"
     joins, predicates, tables, samples, label = load_data(file_name, num_materialized_samples)
 
     # Get feature encoding and proper normalization
     samples_test = encode_samples(tables, samples, table2vec)
-    predicates_test, joins_test = encode_data(predicates, joins, column_min_max_vals, column2vec, op2vec, join2vec)
+    predicates_test, joins_test = encode_data(predicates, joins, column_min_max_vals, column_value_index_dicts, column2vec, op2vec, join2vec)
     labels_test, _, _ = normalize_labels(label, min_val, max_val)
 
     print("Number of test samples: {}".format(len(labels_test)))
@@ -163,6 +167,7 @@ def train_and_predict(workload_name, num_queries, training_file_path, testing_fi
     print("Prediction time per test sample: {}".format(t_total / len(labels_test) * 1000))
 
     # Unnormalize
+    preds_test = [p.cpu() for p in preds_test]
     preds_test_unnorm = unnormalize_labels(preds_test, min_val, max_val)
 
     # Print metrics

@@ -1,8 +1,9 @@
 import csv
+import json
 import torch
 from torch.utils.data import dataset
 
-from mscn.util import *
+from price_test.util import *
 
 
 def load_data(file_name, num_materialized_samples):
@@ -54,6 +55,7 @@ def load_data(file_name, num_materialized_samples):
 def load_and_encode_train_data(num_queries, num_materialized_samples, workload_name, training_file_path):
     file_name_queries = f"{training_file_path}/{workload_name}/train"
     file_name_column_min_max_vals = f"{training_file_path}/{workload_name}/column_min_max_vals.csv"
+    file_value_index_dicts = f"{training_file_path}/{workload_name}/value_index_dicts.json"
 
     joins, predicates, tables, samples, label = load_data(file_name_queries, num_materialized_samples)
 
@@ -81,10 +83,14 @@ def load_and_encode_train_data(num_queries, num_materialized_samples, workload_n
             if i == 0:
                 continue
             column_min_max_vals[row[0]] = [float(row[1]), float(row[2])]
+            
+    # Get value index dicts for each column
+    with open(file_value_index_dicts, 'rU') as f:
+        column_value_index_dicts = json.load(f)
 
     # Get feature encoding and proper normalization
     samples_enc = encode_samples(tables, samples, table2vec)
-    predicates_enc, joins_enc = encode_data(predicates, joins, column_min_max_vals, column2vec, op2vec, join2vec)
+    predicates_enc, joins_enc = encode_data(predicates, joins, column_min_max_vals, column_value_index_dicts, column2vec, op2vec, join2vec)
     label_norm, min_val, max_val = normalize_labels(label)
 
     # Split in training and validation samples
@@ -110,7 +116,7 @@ def load_and_encode_train_data(num_queries, num_materialized_samples, workload_n
     dicts = [table2vec, column2vec, op2vec, join2vec]
     train_data = [samples_train, predicates_train, joins_train]
     test_data = [samples_test, predicates_test, joins_test]
-    return dicts, column_min_max_vals, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data
+    return dicts, column_min_max_vals, column_value_index_dicts, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data
 
 
 def make_dataset(samples, predicates, joins, labels, max_num_joins, max_num_predicates):
@@ -168,7 +174,7 @@ def make_dataset(samples, predicates, joins, labels, max_num_joins, max_num_pred
 
 
 def get_train_datasets(num_queries, num_materialized_samples, workload_name, training_file_path):
-    dicts, column_min_max_vals, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data = load_and_encode_train_data(
+    dicts, column_min_max_vals, column_value_index_dicts, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_data, test_data = load_and_encode_train_data(
         num_queries, num_materialized_samples, workload_name, training_file_path)
     train_dataset = make_dataset(*train_data, labels=labels_train, max_num_joins=max_num_joins,
                                  max_num_predicates=max_num_predicates)
@@ -176,4 +182,4 @@ def get_train_datasets(num_queries, num_materialized_samples, workload_name, tra
     test_dataset = make_dataset(*test_data, labels=labels_test, max_num_joins=max_num_joins,
                                 max_num_predicates=max_num_predicates)
     print("Created TensorDataset for validation data")
-    return dicts, column_min_max_vals, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_dataset, test_dataset
+    return dicts, column_min_max_vals, column_value_index_dicts, min_val, max_val, labels_train, labels_test, max_num_joins, max_num_predicates, train_dataset, test_dataset
